@@ -3,31 +3,49 @@
 
 import { createOpenAI } from '@ai-sdk/openai';
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
-import { streamText } from 'ai';
-import { Effect, Layer } from 'effect';
+import { stepCountIs, streamText } from 'ai';
+import { Effect, Layer, Stream } from 'effect';
 import { HttpRouter, HttpServerResponse } from 'effect/unstable/http';
 import * as Http from 'node:http';
 
+const runFullStream = () => {
+	const openai = createOpenAI({
+		apiKey: process.env.OPENAI_API_KEY
+	});
+
+	const model = openai('gpt-5.3-codex-api-preview');
+
+	const { fullStream } = streamText({
+		model,
+		prompt: 'How do I use generator functions in javascript?',
+		stopWhen: stepCountIs(5)
+	});
+
+	return fullStream;
+};
+
+export type CodeRunStreamChunkType = ReturnType<typeof runFullStream>;
+
 const MyRoutes = HttpRouter.use((router) =>
 	Effect.gen(function* () {
-		const openai = createOpenAI({
-			apiKey: process.env.OPENAI_API_KEY
-		});
-
-		const model = openai('gpt-5.3-codex-api-preview');
-
 		yield* router.add(
 			'POST',
 			'/stream',
 			Effect.gen(function* () {
-				const res = streamText({
-					model,
-					prompt: 'How do I use generator functions in javascript?'
-				});
+				const fullStream = runFullStream();
 
-				const textStream = res.toTextStreamResponse();
+				const sendStream = Stream.fromAsyncIterable(fullStream, (err) => console.error(err));
 
-				return HttpServerResponse.fromWeb(textStream);
+				const processedStream = sendStream.pipe(
+					Stream.mapEffect((part) =>
+						Effect.gen(function* () {
+							return JSON.stringify({ event: 'data', chunk: part }) + '\n';
+						})
+					),
+					Stream.encodeText
+				);
+
+				return HttpServerResponse.stream(processedStream);
 			})
 		);
 

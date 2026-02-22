@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { commandSandboxTest } from '$lib/remote/daytona.remote';
+	import type { CodeRunStreamChunkType } from '$lib/services/daytona/coderunStream';
 	import { isHttpError } from '@sveltejs/kit';
+
+	type StreamChunk = CodeRunStreamChunkType extends AsyncIterable<infer T> ? T : never;
+	type StreamEvent = { event: string; chunk: StreamChunk };
 
 	let testRunning = $state(false);
 	let streamRunning = $state(false);
@@ -32,10 +36,25 @@
 
 			const reader = res.body!.getReader();
 			const decoder = new TextDecoder();
+			let buffer = '';
+
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
-				streamOutput += decoder.decode(value, { stream: true });
+				buffer += decoder.decode(value, { stream: true });
+				const lines = buffer.split('\n');
+				buffer = lines.pop() ?? '';
+				for (const line of lines) {
+					if (!line.trim()) continue;
+					try {
+						const event = JSON.parse(line) as StreamEvent;
+						if (event.chunk.type === 'text-delta') {
+							streamOutput += event.chunk.text;
+						}
+					} catch {
+						// ignore malformed lines
+					}
+				}
 			}
 		} catch (e) {
 			handleError(e);
