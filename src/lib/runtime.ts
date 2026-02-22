@@ -1,9 +1,10 @@
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Schema } from 'effect';
 import { DbError, DbService, dbServiceLayer } from '$lib/services/db.service';
+import { DaytonaError, DaytonaService, daytonaServiceLayer } from '$lib/services/daytona.service';
 import { NodeServices } from '@effect/platform-node';
 import { error } from '@sveltejs/kit';
 
-const appLayer = Layer.mergeAll(dbServiceLayer, NodeServices.layer);
+const appLayer = Layer.mergeAll(dbServiceLayer, NodeServices.layer, daytonaServiceLayer);
 
 export const runtime = ManagedRuntime.make(appLayer);
 
@@ -14,7 +15,11 @@ export class GenericError extends Schema.ErrorClass<GenericError>('GenericError'
 }) {}
 
 export const effectRunner = async <T>(
-	effect: Effect.Effect<T, DbError | GenericError, DbService | NodeServices.NodeServices>
+	effect: Effect.Effect<
+		T,
+		DbError | GenericError | DaytonaError,
+		DbService | NodeServices.NodeServices | DaytonaService
+	>
 ) => {
 	const exit = await runtime.runPromiseExit(effect);
 
