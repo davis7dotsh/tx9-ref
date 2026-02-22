@@ -48,7 +48,7 @@ const createStream = (messages?: ModelMessage[]) => {
 		model: openai('gpt-5.3-codex-api-preview'),
 		messages: messages ?? [{ role: 'user', content: userContent }],
 		system: systemPrompt,
-		stopWhen: stepCountIs(10),
+		stopWhen: stepCountIs(20),
 		tools: {
 			exaSearch: tool({
 				description:

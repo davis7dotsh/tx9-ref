@@ -4,3 +4,10 @@
 @theme {
 	--color-primary: #529ff2;
 }
+
+@layer base {
+	html {
+		background-color: theme(colors.neutral.950);
+		color: theme(colors.neutral.100);
+	}
+}
