@@ -1,7 +1,19 @@
 <script lang="ts">
 	import { commandDeleteUser, formCreateUser, queryGetAllUsers } from '$lib/remote/users.remote';
+	import { isHttpError } from '@sveltejs/kit';
 
 	const users = queryGetAllUsers();
+
+	let deleteError = $state<string | null>(null);
+
+	const handleDelete = async (id: string) => {
+		deleteError = null;
+		try {
+			await commandDeleteUser({ id });
+		} catch (e) {
+			deleteError = isHttpError(e) ? e.body.message : 'Failed to delete user';
+		}
+	};
 </script>
 
 <div class="mx-auto max-w-2xl px-6 py-16">
@@ -24,7 +36,7 @@
 							<span class="ml-3 text-xs text-neutral-400">{user.favorite_color}</span>
 						</div>
 						<button
-							onclick={() => commandDeleteUser({ id: user.id })}
+							onclick={() => handleDelete(user.id)}
 							disabled={commandDeleteUser.pending > 0}
 							class="text-xs text-neutral-400 transition hover:text-red-500 disabled:opacity-40"
 						>
@@ -34,28 +46,41 @@
 				{/each}
 			</ul>
 		{/if}
+
+		{#if deleteError}
+			<p class="mt-2 text-xs text-red-500">{deleteError}</p>
+		{/if}
 	</div>
 
 	<!-- Create user form -->
 	<div class="rounded-xl border border-neutral-200 p-6">
 		<h2 class="mb-4 text-sm font-semibold text-neutral-700">New user</h2>
+
 		<form {...formCreateUser} class="flex flex-col gap-3">
 			<div class="flex gap-3">
-				<input
-					type="text"
-					name="name"
-					placeholder="Name"
-					required
-					class="flex-1 rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-				/>
-				<input
-					type="text"
-					name="favorite_color"
-					placeholder="Favorite color"
-					required
-					class="flex-1 rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-				/>
+				<div class="flex flex-1 flex-col gap-1">
+					<input
+						{...formCreateUser.fields.name.as('text')}
+						placeholder="Name"
+						class="rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 aria-invalid:border-red-400 aria-invalid:focus:border-red-400 aria-invalid:focus:ring-red-400/20"
+					/>
+					{#each formCreateUser.fields.name.issues() as issue}
+						<p class="text-xs text-red-500">{issue.message}</p>
+					{/each}
+				</div>
+
+				<div class="flex flex-1 flex-col gap-1">
+					<input
+						{...formCreateUser.fields.favorite_color.as('text')}
+						placeholder="Favorite color"
+						class="rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 aria-invalid:border-red-400 aria-invalid:focus:border-red-400 aria-invalid:focus:ring-red-400/20"
+					/>
+					{#each formCreateUser.fields.favorite_color.issues() as issue}
+						<p class="text-xs text-red-500">{issue.message}</p>
+					{/each}
+				</div>
 			</div>
+
 			<button
 				type="submit"
 				disabled={formCreateUser.pending > 0}
@@ -64,6 +89,7 @@
 				{formCreateUser.pending > 0 ? 'Creating...' : 'Create user'}
 			</button>
 		</form>
+
 		{#if formCreateUser.result}
 			<p class="mt-3 text-xs text-neutral-400">Created user {formCreateUser.result.id}</p>
 		{/if}

@@ -1,6 +1,6 @@
 {
 	"$schema": "https://btca.dev/btca.schema.json",
-	"model": "claude-haiku-4-5",
+	"model": "claude-sonnet-4-6",
 	"provider": "opencode",
 	"dataDirectory": ".btca",
 	"resources": [

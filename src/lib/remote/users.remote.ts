@@ -32,8 +32,8 @@ export const queryGetUser = query(queryGetUserSchema, async ({ id }) => {
 });
 
 const formCreateUserSchema = Schema.Struct({
-	name: Schema.String,
-	favorite_color: Schema.String
+	name: Schema.NonEmptyString,
+	favorite_color: Schema.NonEmptyString
 }).pipe(Schema.toStandardSchemaV1);
 
 export const formCreateUser = form(formCreateUserSchema, async ({ name, favorite_color }) => {
