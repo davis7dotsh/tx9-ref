@@ -1,0 +1,54 @@
+{
+	"$schema": "https://btca.dev/btca.schema.json",
+	"model": "claude-haiku-4-5",
+	"provider": "opencode",
+	"dataDirectory": ".btca",
+	"resources": [
+		{
+			"type": "git",
+			"name": "daytona",
+			"url": "https://github.com/daytonaio/daytona",
+			"branch": "main"
+		},
+		{
+			"type": "git",
+			"name": "effect-smol",
+			"url": "https://github.com/Effect-TS/effect-smol",
+			"branch": "main"
+		},
+		{
+			"type": "git",
+			"name": "svelte",
+			"url": "https://github.com/sveltejs/svelte",
+			"branch": "main",
+			"specialNotes": "The core Svelte compiler and runtime. This is the heart of Svelte — the component framework, reactivity system, and compiler that transforms .svelte files into optimized JavaScript."
+		},
+		{
+			"type": "git",
+			"name": "kit",
+			"url": "https://github.com/sveltejs/kit",
+			"branch": "main",
+			"specialNotes": "SvelteKit — the full-stack application framework built on top of Svelte. Handles routing, SSR, server-side load functions, form actions, adapters for deployment targets, and project scaffolding."
+		},
+		{
+			"type": "git",
+			"name": "svelte-dev",
+			"url": "https://github.com/sveltejs/svelte.dev",
+			"branch": "main",
+			"searchPath": "apps/svelte.dev",
+			"specialNotes": "The official Svelte documentation and learning site (svelte.dev). Contains docs for both Svelte and SvelteKit, tutorials, examples, and the REPL. Use this for doc content and site structure questions."
+		},
+		{
+			"type": "git",
+			"name": "tailwindcss-com",
+			"url": "https://github.com/tailwindlabs/tailwindcss.com",
+			"branch": "main"
+		},
+		{
+			"type": "git",
+			"name": "just-bash",
+			"url": "https://github.com/vercel-labs/just-bash",
+			"branch": "main"
+		}
+	]
+}
