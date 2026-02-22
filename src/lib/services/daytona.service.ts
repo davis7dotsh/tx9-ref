@@ -20,7 +20,7 @@ const daytonaServiceEffect = Effect.gen(function* () {
 		apiUrl: env.DAYTONA_BASE_URL
 	});
 
-	const codeRunStream = (prompt: string) =>
+	const codeRunStream = (prompt: string, repoUrl?: string) =>
 		Effect.gen(function* () {
 			yield* Effect.logInfo('[stream] creating sandbox');
 			const sandbox = yield* Effect.tryPromise({
@@ -29,7 +29,8 @@ const daytonaServiceEffect = Effect.gen(function* () {
 						envVars: {
 							OPENAI_API_KEY: env.OPENAI_API_KEY,
 							EXA_API_KEY: env.EXA_API_KEY,
-							BTCA_PROMPT: prompt
+							BTCA_PROMPT: prompt,
+							...(repoUrl ? { BTCA_REPO_URL: repoUrl } : {})
 						}
 					}),
 				catch: (error) =>

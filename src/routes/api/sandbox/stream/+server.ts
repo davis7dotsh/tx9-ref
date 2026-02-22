@@ -4,15 +4,16 @@ import type { RequestHandler } from './$types';
 import { Effect, Scope } from 'effect';
 
 export const POST: RequestHandler = async ({ request }) => {
-	const body = (await request.json().catch(() => ({}))) as { prompt?: string };
+	const body = (await request.json().catch(() => ({}))) as { prompt?: string; repoUrl?: string };
 	const prompt =
 		body.prompt?.trim() || 'How do I use generator functions in javascript? Include example code.';
+	const repoUrl = body.repoUrl?.trim() || undefined;
 
 	const stream = await effectRunner(
 		Effect.gen(function* () {
 			const { codeRunStream } = yield* DaytonaService;
 
-			return yield* codeRunStream(prompt);
+			return yield* codeRunStream(prompt, repoUrl);
 		})
 	);
 
