@@ -33,16 +33,16 @@ export const queryGetUser = query(queryGetUserSchema, async ({ id }) => {
 
 const formCreateUserSchema = Schema.Struct({
 	name: Schema.String,
-	age: Schema.Number
+	favorite_color: Schema.String
 }).pipe(Schema.toStandardSchemaV1);
 
-export const formCreateUser = form(formCreateUserSchema, async ({ name, age }) => {
+export const formCreateUser = form(formCreateUserSchema, async ({ name, favorite_color }) => {
 	const createUserEffect = Effect.gen(function* () {
 		const dbService = yield* DbService;
 
 		const id = yield* Random.nextUUIDv4;
 
-		const newId = yield* dbService.createUser({ id, name, age });
+		const newId = yield* dbService.createUser({ id, name, favorite_color });
 
 		// single flight mutation to refresh the users list
 		yield* Effect.promise(() => queryGetAllUsers().refresh());

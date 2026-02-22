@@ -6,15 +6,21 @@ export class DbError extends Schema.ErrorClass<DbError>('DbError')({
 	cause: Schema.optional(Schema.Defect)
 }) {}
 
+type User = {
+	id: string;
+	name: string;
+	favorite_color: string;
+};
+
 const dbServiceEffect = Effect.gen(function* () {
 	// imagine this is connecting to a real database
-	let db = new Map<string, { name: string; age: number }>([['user1', { name: 'Ben', age: 23 }]]);
+	let db = new Map<string, Omit<User, 'id'>>([['user1', { name: 'Ben', favorite_color: 'blue' }]]);
 
 	yield* Effect.addFinalizer(() =>
 		Effect.gen(function* () {
 			// imagine this is closing the connection to the real database
 			yield* Effect.logInfo('Closing database connection');
-			db = new Map<string, { name: string; age: number }>();
+			db = new Map<string, Omit<User, 'id'>>();
 		})
 	);
 
@@ -34,16 +40,16 @@ const dbServiceEffect = Effect.gen(function* () {
 			return user;
 		});
 
-	const createUser = (data: { id: string; name: string; age: number }) =>
+	const createUser = (data: { id: string; name: string; favorite_color: string }) =>
 		Effect.gen(function* () {
-			const { id, name, age } = data;
-			db.set(id, { name, age });
+			const { id, name, favorite_color } = data;
+			db.set(id, { name, favorite_color: favorite_color });
 			return { id };
 		});
 
 	const getAllUsers = () =>
 		Effect.gen(function* () {
-			return Array.from(db.values());
+			return Array.from(db.entries()).map(([id, user]) => ({ id, ...user }));
 		});
 
 	const deleteUser = (id: string) =>

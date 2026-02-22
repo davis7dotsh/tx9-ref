@@ -8,6 +8,8 @@ node_modules
 /.svelte-kit
 /build
 
+.btca
+
 # OS
 .DS_Store
 Thumbs.db

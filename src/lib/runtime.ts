@@ -1,12 +1,11 @@
-import { Cause, Effect, Exit, Layer, Schema } from 'effect';
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Schema } from 'effect';
 import { DbError, DbService, dbServiceLayer } from '$lib/services/db.service';
 import { NodeServices } from '@effect/platform-node';
 import { error } from '@sveltejs/kit';
 
-// this file contains the effect runner which should be used in endpoints, load functions, actions, and remote functions to execute effectful code and handle errors.
-
-// when a new service is created, add it to the app layer. and add it's error type to the effect runner.
 const appLayer = Layer.mergeAll(dbServiceLayer, NodeServices.layer);
+
+export const runtime = ManagedRuntime.make(appLayer);
 
 export class GenericError extends Schema.ErrorClass<GenericError>('GenericError')({
 	message: Schema.String,
@@ -17,7 +16,7 @@ export class GenericError extends Schema.ErrorClass<GenericError>('GenericError'
 export const effectRunner = async <T>(
 	effect: Effect.Effect<T, DbError | GenericError, DbService | NodeServices.NodeServices>
 ) => {
-	const exit = await effect.pipe(Effect.provide(appLayer), Effect.runPromiseExit);
+	const exit = await runtime.runPromiseExit(effect);
 
 	if (Exit.isFailure(exit)) {
 		const cause = exit.cause;

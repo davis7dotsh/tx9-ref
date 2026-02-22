@@ -1,3 +1,3 @@
 interface:
-  display_name: "BTCA CLI"
-  short_description: "Help with BTCA CLI setup and usage workflows"
+  display_name: 'BTCA CLI'
+  short_description: 'Help with BTCA CLI setup and usage workflows'
