@@ -20,95 +20,103 @@ const daytonaServiceEffect = Effect.gen(function* () {
 		apiUrl: env.DAYTONA_BASE_URL
 	});
 
-	const codeRunStream = Effect.gen(function* () {
-		yield* Effect.logInfo('[stream] creating sandbox');
-		const sandbox = yield* Effect.tryPromise({
-			try: () => daytona.create({ envVars: { OPENAI_API_KEY: env.OPENAI_API_KEY } }),
-			catch: (error) =>
-				new DaytonaError({ message: 'Failed to create sandbox', code: 500, cause: error })
-		});
-
-		const stop = () => sandbox.stop().catch(() => {});
-
-		const sandboxRes = yield* Effect.gen(function* () {
-			yield* Effect.tryPromise({
+	const codeRunStream = (prompt: string) =>
+		Effect.gen(function* () {
+			yield* Effect.logInfo('[stream] creating sandbox');
+			const sandbox = yield* Effect.tryPromise({
 				try: () =>
-					sandbox.fs.uploadFile(Buffer.from(coderunStreamBundle), '/tmp/coderunStream.mjs'),
-				catch: (error) =>
-					new DaytonaError({ message: 'Failed to upload stream bundle', code: 500, cause: error })
-			});
-
-			yield* Effect.tryPromise({
-				try: () => sandbox.process.createSession('stream-server'),
-				catch: (error) =>
-					new DaytonaError({ message: 'Failed to create session', code: 500, cause: error })
-			});
-
-			const { cmdId } = yield* Effect.tryPromise({
-				try: () =>
-					sandbox.process.executeSessionCommand('stream-server', {
-						command: 'node /tmp/coderunStream.mjs',
-						runAsync: true
+					daytona.create({
+						envVars: {
+							OPENAI_API_KEY: env.OPENAI_API_KEY,
+							EXA_API_KEY: env.EXA_API_KEY,
+							BTCA_PROMPT: prompt
+						}
 					}),
 				catch: (error) =>
-					new DaytonaError({ message: 'Failed to start stream server', code: 500, cause: error })
-			});
-			yield* Effect.logInfo(`[stream] server started cmdId=${cmdId}`);
-
-			const preview = yield* Effect.tryPromise({
-				try: () => sandbox.getPreviewLink(3000),
-				catch: (error) =>
-					new DaytonaError({ message: 'Failed to get preview link', code: 500, cause: error })
+					new DaytonaError({ message: 'Failed to create sandbox', code: 500, cause: error })
 			});
 
-			const previewUrl = (path: string) =>
-				`${preview.url}${path}?DAYTONA_SANDBOX_AUTH_KEY=${preview.token}`;
+			const stop = () => sandbox.stop().catch(() => {});
 
-			yield* Effect.retry(
-				Effect.gen(function* () {
-					const r = yield* Effect.tryPromise({
-						try: () => fetch(previewUrl('/health')),
-						catch: (error) =>
-							new DaytonaError({ message: `Health fetch error: ${error}`, code: 503 })
-					});
-					if (!r.ok)
-						return yield* Effect.fail(
-							new DaytonaError({ message: `Health check ${r.status}`, code: 503 })
-						);
-				}),
-				Schedule.exponential('500 millis').pipe(Schedule.compose(Schedule.recurs(20)))
-			);
+			const sandboxRes = yield* Effect.gen(function* () {
+				yield* Effect.tryPromise({
+					try: () =>
+						sandbox.fs.uploadFile(Buffer.from(coderunStreamBundle), '/tmp/coderunStream.mjs'),
+					catch: (error) =>
+						new DaytonaError({ message: 'Failed to upload stream bundle', code: 500, cause: error })
+				});
 
-			yield* Effect.logInfo('[stream] server ready');
+				yield* Effect.tryPromise({
+					try: () => sandbox.process.createSession('stream-server'),
+					catch: (error) =>
+						new DaytonaError({ message: 'Failed to create session', code: 500, cause: error })
+				});
 
-			return yield* Effect.tryPromise({
-				try: () => fetch(previewUrl('/stream'), { method: 'POST' }),
-				catch: (error) =>
-					new DaytonaError({ message: 'Failed to connect to stream', code: 500, cause: error })
-			});
-		}).pipe(Effect.tapError(() => Effect.promise(stop)));
+				const { cmdId } = yield* Effect.tryPromise({
+					try: () =>
+						sandbox.process.executeSessionCommand('stream-server', {
+							command: 'node /tmp/coderunStream.mjs',
+							runAsync: true
+						}),
+					catch: (error) =>
+						new DaytonaError({ message: 'Failed to start stream server', code: 500, cause: error })
+				});
+				yield* Effect.logInfo(`[stream] server started cmdId=${cmdId}`);
 
-		return new ReadableStream<Uint8Array>({
-			async start(controller) {
-				try {
-					const reader = sandboxRes.body!.getReader();
-					while (true) {
-						const { done, value } = await reader.read();
-						if (done) break;
-						controller.enqueue(value);
+				const preview = yield* Effect.tryPromise({
+					try: () => sandbox.getPreviewLink(3000),
+					catch: (error) =>
+						new DaytonaError({ message: 'Failed to get preview link', code: 500, cause: error })
+				});
+
+				const previewUrl = (path: string) =>
+					`${preview.url}${path}?DAYTONA_SANDBOX_AUTH_KEY=${preview.token}`;
+
+				yield* Effect.retry(
+					Effect.gen(function* () {
+						const r = yield* Effect.tryPromise({
+							try: () => fetch(previewUrl('/health')),
+							catch: (error) =>
+								new DaytonaError({ message: `Health fetch error: ${error}`, code: 503 })
+						});
+						if (!r.ok)
+							return yield* Effect.fail(
+								new DaytonaError({ message: `Health check ${r.status}`, code: 503 })
+							);
+					}),
+					Schedule.exponential('500 millis').pipe(Schedule.compose(Schedule.recurs(20)))
+				);
+
+				yield* Effect.logInfo('[stream] server ready');
+
+				return yield* Effect.tryPromise({
+					try: () => fetch(previewUrl('/stream'), { method: 'POST' }),
+					catch: (error) =>
+						new DaytonaError({ message: 'Failed to connect to stream', code: 500, cause: error })
+				});
+			}).pipe(Effect.tapError(() => Effect.promise(stop)));
+
+			return new ReadableStream<Uint8Array>({
+				async start(controller) {
+					try {
+						const reader = sandboxRes.body!.getReader();
+						while (true) {
+							const { done, value } = await reader.read();
+							if (done) break;
+							controller.enqueue(value);
+						}
+						controller.close();
+					} catch (e) {
+						controller.error(e);
+					} finally {
+						await stop();
 					}
-					controller.close();
-				} catch (e) {
-					controller.error(e);
-				} finally {
-					await stop();
+				},
+				cancel() {
+					stop();
 				}
-			},
-			cancel() {
-				stop();
-			}
+			});
 		});
-	});
 
 	const basicCodeRun = Effect.gen(function* () {
 		const sandbox = yield* Effect.tryPromise({
@@ -117,7 +125,7 @@ const daytonaServiceEffect = Effect.gen(function* () {
 				new DaytonaError({ message: 'Failed to create sandbox', code: 500, cause: error })
 		});
 
-		yield* Effect.addFinalizer(() => Effect.promise(() => sandbox.stop()));
+		yield* Effect.addFinalizer(() => Effect.promise(() => sandbox.archive()));
 
 		yield* Effect.tryPromise({
 			try: () => sandbox.fs.uploadFile(Buffer.from(coderunBundle), '/tmp/coderun.mjs'),
