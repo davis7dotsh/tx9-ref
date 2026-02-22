@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { Daytona } from '@daytonaio/sdk';
-import { Effect, Layer, Schema, ServiceMap } from 'effect';
+import { Effect, Layer, Schema, Scope, ServiceMap } from 'effect';
+import coderunBundle from 'virtual:coderun-bundle';
 
 // stuff to do with daytona:
 // pass env vars into a sandbox
@@ -18,25 +19,68 @@ const daytonaServiceEffect = Effect.gen(function* () {
 		apiUrl: env.DAYTONA_BASE_URL
 	});
 
-	const sandboxTest = Effect.gen(function* () {
+	// an llm stream that's running on the sandbox
+	const codeRunStream = Effect.gen(function* () {
 		const sandbox = yield* Effect.tryPromise({
 			try: () =>
 				daytona.create({
-					language: 'typescript'
+					envVars: {
+						OPENAI_API_KEY: env.OPENAI_API_KEY
+					}
 				}),
 			catch: (error) =>
 				new DaytonaError({
-					message: 'Failed to test sandbox',
+					message: 'Failed to create sandbox',
+					code: 500,
+					cause: error
+				})
+		});
+
+		yield* Effect.addFinalizer(() =>
+			Effect.promise(async () => {
+				console.log('stopping sandbox');
+				await sandbox.stop();
+				console.log('sandbox stopped');
+			})
+		);
+	});
+
+	// a basic snippet of code that can be run in the sandbox
+	const basicCodeRun = Effect.gen(function* () {
+		yield* Effect.logInfo('Creating sandbox');
+		const sandbox = yield* Effect.tryPromise({
+			try: () => daytona.create(),
+			catch: (error) =>
+				new DaytonaError({
+					message: 'Failed to create sandbox',
+					code: 500,
+					cause: error
+				})
+		});
+
+		yield* Effect.addFinalizer(() =>
+			Effect.promise(async () => {
+				console.log('stopping sandbox');
+				await sandbox.stop();
+				console.log('sandbox stopped');
+			})
+		);
+
+		yield* Effect.tryPromise({
+			try: () => sandbox.fs.uploadFile(Buffer.from(coderunBundle), '/tmp/coderun.mjs'),
+			catch: (error) =>
+				new DaytonaError({
+					message: 'Failed to upload coderun bundle',
 					code: 500,
 					cause: error
 				})
 		});
 
 		const response = yield* Effect.tryPromise({
-			try: () => sandbox.process.codeRun(`console.log("Hello, world!")`),
+			try: () => sandbox.process.executeCommand('node /tmp/coderun.mjs'),
 			catch: (error) =>
 				new DaytonaError({
-					message: 'Failed to execute sandbox',
+					message: 'Failed to execute coderun',
 					code: 500,
 					cause: error
 				})
@@ -50,15 +94,14 @@ const daytonaServiceEffect = Effect.gen(function* () {
 					cause: new Error(response.result)
 				})
 			);
-		} else {
-			yield* Effect.logInfo(`Sandbox output: ${response.result}`);
 		}
 
+		yield* Effect.logInfo(`Sandbox output: ${response.result}`);
 		return response;
 	});
 
 	return {
-		sandboxTest
+		basicCodeRun
 	};
 });
 

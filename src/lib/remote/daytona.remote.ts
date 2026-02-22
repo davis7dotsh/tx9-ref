@@ -1,13 +1,17 @@
 import { command } from '$app/server';
 import { effectRunner } from '$lib/runtime';
 import { DaytonaService } from '$lib/services/daytona.service';
-import { Effect } from 'effect';
+import { Effect, Scope } from 'effect';
 
 export const commandSandboxTest = command(async () => {
 	const sandboxTestEffect = Effect.gen(function* () {
 		const daytonaService = yield* DaytonaService;
 
-		return yield* daytonaService.sandboxTest;
+		const scope = yield* Scope.make('parallel');
+
+		const result = yield* Scope.use(scope)(daytonaService.basicCodeRun);
+
+		return result;
 	});
 
 	const result = await effectRunner(sandboxTestEffect);

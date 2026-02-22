@@ -4,7 +4,7 @@ import { NodeRuntime } from '@effect/platform-node';
 import { Console, Effect, Stream } from 'effect';
 
 const program = Effect.gen(function* () {
-	yield* Stream.make(1, 2, 3).pipe(
+	yield* Stream.make(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).pipe(
 		Stream.map((x) => x * 2),
 		Stream.runForEach((n) => Console.log(`number is ${n}`))
 	);
