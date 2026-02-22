@@ -125,7 +125,7 @@ const daytonaServiceEffect = Effect.gen(function* () {
 				new DaytonaError({ message: 'Failed to create sandbox', code: 500, cause: error })
 		});
 
-		yield* Effect.addFinalizer(() => Effect.promise(() => sandbox.archive()));
+		yield* Effect.addFinalizer(() => Effect.promise(() => sandbox.stop()));
 
 		yield* Effect.tryPromise({
 			try: () => sandbox.fs.uploadFile(Buffer.from(coderunBundle), '/tmp/coderun.mjs'),
