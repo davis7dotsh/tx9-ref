@@ -1,7 +1,7 @@
 import { command, form, query } from '$app/server';
 import { Effect, Random, Schema } from 'effect';
 import { DbService } from '$lib/services/db.service';
-import { effectRunner, GenericError } from '$lib/runtime';
+import { effectRunner } from '$lib/runtime';
 
 export const queryGetAllUsers = query(async () => {
 	const getAllUsersEffect = Effect.gen(function* () {
