@@ -1,2 +1,8 @@
-<h1 class="text-primary">Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<h1 class="text-primary">Reference demos</h1>
+
+<ul>
+	<li>
+		<a href="/users">users page demo</a>
+		<p>Hits: effect, remote functions, and async svelte</p>
+	</li>
+</ul>
