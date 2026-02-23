@@ -138,24 +138,7 @@ const daytonaServiceEffect = Effect.gen(function* () {
 					new DaytonaError({ message: 'Failed to connect to stream', code: 500, cause: error })
 			});
 
-			return {
-				sandboxId: currentSandboxId,
-				stream: new ReadableStream<Uint8Array>({
-					async start(controller) {
-						try {
-							const reader = sandboxRes.body!.getReader();
-							while (true) {
-								const { done, value } = await reader.read();
-								if (done) break;
-								controller.enqueue(value);
-							}
-							controller.close();
-						} catch (e) {
-							controller.error(e);
-						}
-					}
-				})
-			};
+			return { sandboxId: currentSandboxId, stream: sandboxRes.body! };
 		});
 
 	const basicCodeRun = Effect.gen(function* () {

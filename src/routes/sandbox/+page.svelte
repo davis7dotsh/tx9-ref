@@ -3,19 +3,16 @@
 	import type { ModelMessage } from 'ai';
 	import { isHttpError } from '@sveltejs/kit';
 	import { marked } from 'marked';
-	import { tick } from 'svelte';
 
 	const renderMd = (text: string) => marked.parse(text) as string;
 
-	type StreamChunk = CodeRunStreamChunkType extends AsyncIterable<infer T> ? T : never;
-	type StreamEvent = {
-		event: string;
-		chunk: StreamChunk | { type: 'done'; messages: ModelMessage[] };
-	};
-	type ToolStartBlock = { id: number; kind: 'tool_start'; name: string; input?: unknown };
-	type ToolResultBlock = { id: number; kind: 'tool_result'; name: string; result?: unknown };
-	type TextBlock = { id: number; kind: 'text'; text: string };
-	type FlowBlock = ToolStartBlock | ToolResultBlock | TextBlock;
+	type StreamChunk =
+		| (CodeRunStreamChunkType extends AsyncIterable<infer T> ? T : never)
+		| { type: 'done'; messages: ModelMessage[] };
+	type FlowBlock =
+		| { id: number; kind: 'tool_start'; name: string; input?: unknown }
+		| { id: number; kind: 'tool_result'; name: string; result?: unknown }
+		| { id: number; kind: 'text'; text: string };
 	type Turn =
 		| { role: 'user'; text: string; repoUrl?: string }
 		| { role: 'assistant'; blocks: FlowBlock[] };
@@ -50,7 +47,7 @@
 
 	let blockId = 0;
 
-	const currentBlocks = (): FlowBlock[] => {
+	const currentBlocks = () => {
 		const last = turns.at(-1);
 		return last?.role === 'assistant' ? last.blocks : [];
 	};
@@ -77,9 +74,9 @@
 		else console.error(e);
 	};
 
-	const parseStreamEvent = (line: string): StreamEvent | null => {
+	const parseStreamChunk = (line: string): StreamChunk | null => {
 		try {
-			return JSON.parse(line) as StreamEvent;
+			return JSON.parse(line) as StreamChunk;
 		} catch {
 			return null;
 		}
@@ -131,9 +128,8 @@
 				buffer = lines.pop() ?? '';
 				for (const line of lines) {
 					if (!line.trim()) continue;
-					const event = parseStreamEvent(line);
-					if (!event?.chunk) continue;
-					const chunk = event.chunk;
+					const chunk = parseStreamChunk(line);
+					if (!chunk) continue;
 
 					if (chunk.type === 'tool-call') {
 						const blocks = currentBlocks();
@@ -167,9 +163,7 @@
 										id: ++blockId,
 										kind: 'tool_result',
 										name: chunk.toolName,
-										result: ('output' in chunk
-											? chunk.output
-											: undefined) as ToolResultBlock['result']
+										result: ('output' in chunk ? chunk.output : undefined) as unknown
 									}
 								]
 							}
@@ -202,210 +196,227 @@
 	};
 
 	const handleKeydown = (e: KeyboardEvent) => {
-		if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+		if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
 			e.preventDefault();
 			void handleSandboxStream();
 		}
 	};
+
+	const presets = [
+		{ label: 'svelte.dev', url: 'https://github.com/sveltejs/svelte.dev' },
+		{ label: 'effect-smol', url: 'https://github.com/Effect-TS/effect-smol' },
+		{ label: 'daytona', url: 'https://github.com/daytonaio/daytona' }
+	];
+
+	const examplePrompts = [
+		'How does routing work in this codebase?',
+		'Find all API endpoints and explain them',
+		'Explain the authentication flow'
+	];
 </script>
 
-<div class="flex h-screen flex-col">
-	<header class="flex shrink-0 items-center gap-3 border-b border-neutral-800 px-5 py-3.5">
-		<span class="text-sm font-medium text-neutral-100">Research Agent</span>
-		<span class="text-neutral-700">·</span>
-		<span class="text-xs text-neutral-500">Daytona sandbox</span>
+<svelte:head>
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+	<link
+		href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+		rel="stylesheet"
+	/>
+</svelte:head>
+
+<div class="page">
+	<!-- Header -->
+	<header class="header">
+		<span class="header-title">Research Agent</span>
+		<div class="header-sep"></div>
+		<span class="header-sub">Daytona sandbox</span>
 		{#if sandboxId}
-			<span class="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-500"
-				>{sandboxId.slice(0, 8)}…</span
-			>
+			<span class="sandbox-id">{sandboxId.slice(0, 8)}…</span>
 		{/if}
-		<div class="ml-auto flex items-center gap-3">
+		<div class="header-right">
 			{#if turns.length}
-				<button
-					onclick={newSession}
-					disabled={streamRunning}
-					class="text-xs text-neutral-500 hover:text-neutral-300 disabled:cursor-not-allowed disabled:opacity-40"
-				>
+				<button onclick={newSession} disabled={streamRunning} class="btn-new-session">
 					New session
 				</button>
 			{/if}
-			{#if streamRunning}
-				<span class="size-1.5 animate-pulse rounded-full bg-primary"></span>
-				<span class="text-xs text-primary">streaming</span>
-			{:else}
-				<span class="text-xs text-neutral-600">idle</span>
-			{/if}
+			<div class="status">
+				<div class="status-dot" class:live={streamRunning}></div>
+				<span class="status-text" class:live={streamRunning}>
+					{streamRunning ? 'live' : 'idle'}
+				</span>
+			</div>
 		</div>
 	</header>
 
-	<div bind:this={messagesEl} class="min-h-0 flex-1 overflow-y-auto px-5 py-6">
+	<!-- Messages -->
+	<div bind:this={messagesEl} class="messages">
 		{#if !turns.length}
-			<div class="flex h-full flex-col items-center justify-center gap-2 text-center">
-				<p class="text-sm font-medium text-neutral-400">Ask about a GitHub repo</p>
-				<p class="max-w-xs text-xs text-neutral-600">
-					Paste a repo URL below and ask a question. The agent will clone, search, and read files in
-					a Daytona sandbox.
+			<div class="empty">
+				<p class="empty-label">Sandbox Research Agent</p>
+				<h2 class="empty-title">Ask about any repository</h2>
+				<p class="empty-desc">
+					Paste a GitHub URL and ask a question. The agent clones, searches, and reads files in a
+					Daytona sandbox.
 				</p>
+				<div class="empty-examples">
+					{#each examplePrompts as ex}
+						<button onclick={() => (prompt = ex)} class="example-btn">{ex}</button>
+					{/each}
+				</div>
 			</div>
 		{/if}
 
-		<div class="mx-auto max-w-3xl space-y-6">
+		<div class="turns">
 			{#each turns as turn (turn)}
 				{#if turn.role === 'user'}
-					<div class="flex justify-end">
-						<div class="max-w-[75%] space-y-1.5">
+					<div class="user-turn">
+						<div class="user-content">
 							{#if turn.repoUrl}
-								<div class="rounded-lg bg-neutral-800 px-3 py-2 text-right">
-									<p class="font-mono text-xs text-neutral-400">{turn.repoUrl}</p>
+								<div class="repo-pill">
+									<svg
+										width="10"
+										height="10"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+									>
+										<path
+											d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"
+										/>
+									</svg>
+									<span class="repo-pill-text">{turn.repoUrl}</span>
 								</div>
 							{/if}
-							<div class="rounded-2xl rounded-tr-sm bg-primary/15 px-4 py-3">
-								<p class="text-sm text-neutral-100">{turn.text}</p>
+							<div class="user-bubble">
+								<p>{turn.text}</p>
 							</div>
 						</div>
 					</div>
 				{:else}
-					<div class="space-y-2">
+					<div class="assistant-turn">
 						{#if !turn.blocks.length && streamRunning}
-							<div class="flex items-center gap-2 py-1">
-								<span class="size-1.5 animate-pulse rounded-full bg-neutral-600"></span>
-								<span class="animate-pulse text-xs text-neutral-600">thinking…</span>
+							<div class="thinking">
+								<div class="thinking-dots">
+									<span></span><span></span><span></span>
+								</div>
+								<span class="thinking-text">Thinking…</span>
 							</div>
 						{/if}
+
 						{#each turn.blocks as block (block.id)}
 							{#if block.kind === 'tool_start'}
-								<details class="group rounded-lg border border-neutral-800 bg-neutral-900/60">
-									<summary
-										class="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs"
-									>
-										<span
-											class="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-500"
-											>call</span
-										>
-										<span class="font-medium text-neutral-300">{block.name}</span>
+								<details class="tool-block call">
+									<summary class="tool-summary">
+										<span class="tool-tag call">call</span>
+										<span class="tool-fn">{block.name}</span>
 										<svg
-											class="ml-auto size-3 shrink-0 text-neutral-600 transition-transform group-open:rotate-180"
-											xmlns="http://www.w3.org/2000/svg"
+											class="tool-chevron"
+											width="12"
+											height="12"
 											viewBox="0 0 24 24"
 											fill="none"
 											stroke="currentColor"
-											stroke-width="2"><path d="M6 9l6 6 6-6" /></svg
+											stroke-width="2"
 										>
+											<path d="M6 9l6 6 6-6" />
+										</svg>
 									</summary>
 									{#if block.input}
-										<div class="border-t border-neutral-800 px-3 py-2.5">
-											<pre
-												class="overflow-x-auto text-[11px] leading-relaxed text-neutral-500">{JSON.stringify(
-													block.input,
-													null,
-													2
-												)}</pre>
+										<div class="tool-body">
+											<pre>{JSON.stringify(block.input, null, 2)}</pre>
 										</div>
 									{/if}
 								</details>
 							{:else if block.kind === 'tool_result'}
 								{@const meta = resultMeta(block.name, block.result)}
 								{@const r = (block.result ?? {}) as Record<string, unknown>}
-								<details class="group rounded-lg border border-neutral-800 bg-neutral-900/60">
-									<summary
-										class="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs"
-									>
-										<span
-											class="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-500"
-											>result</span
-										>
-										<span class="font-medium text-neutral-300">{block.name}</span>
+								<details class="tool-block result">
+									<summary class="tool-summary">
+										<span class="tool-tag result">result</span>
+										<span class="tool-fn">{block.name}</span>
 										{#if meta.badge}
-											<span class="text-neutral-600">{meta.badge}</span>
+											<span class="tool-badge">{meta.badge}</span>
 										{/if}
 										{#if meta.detail}
-											<span class="max-w-[200px] truncate font-mono text-neutral-600"
-												>{meta.detail}</span
-											>
+											<span class="tool-detail">{meta.detail}</span>
 										{/if}
 										<svg
-											class="ml-auto size-3 shrink-0 text-neutral-600 transition-transform group-open:rotate-180"
-											xmlns="http://www.w3.org/2000/svg"
+											class="tool-chevron"
+											width="12"
+											height="12"
 											viewBox="0 0 24 24"
 											fill="none"
 											stroke="currentColor"
-											stroke-width="2"><path d="M6 9l6 6 6-6" /></svg
+											stroke-width="2"
 										>
+											<path d="M6 9l6 6 6-6" />
+										</svg>
 									</summary>
-									<div class="border-t border-neutral-800 px-3 py-2.5">
+									<div class="tool-body">
 										{#if r.error}
-											<p class="text-xs text-red-400">{r.error}</p>
+											<p class="tool-err">{r.error}</p>
 										{:else if block.name === 'exaSearch'}
 											{#if r.query}
-												<p class="mb-2 text-xs text-neutral-500">
-													Query: <span class="font-medium text-neutral-300">{r.query}</span>
-												</p>
+												<p class="search-query">Query: <strong>{r.query}</strong></p>
 											{/if}
 											{#if Array.isArray(r.results) && r.results.length}
-												<ul class="space-y-3">
+												<ul class="search-list">
 													{#each r.results as result (result.url)}
-														<li class="text-xs">
+														<li class="search-item">
 															<a
-																class="font-medium text-primary hover:underline"
+																class="search-link"
 																href={result.url}
 																target="_blank"
 																rel="noreferrer">{result.title}</a
 															>
-															<p class="truncate text-neutral-600">{result.url}</p>
+															<span class="search-url">{result.url}</span>
 															{#if result.snippet}
-																<p class="mt-0.5 text-neutral-400">{result.snippet}</p>
+																<p class="search-snippet">{result.snippet}</p>
 															{/if}
 														</li>
 													{/each}
 												</ul>
 											{/if}
 										{:else if block.name === 'cloneGitRepo'}
-											<p class="font-mono text-xs text-neutral-400">{r.repoPath}</p>
+											<pre>{r.repoPath}</pre>
 										{:else if block.name === 'searchRepo'}
 											{#if Array.isArray(r.matches) && r.matches.length}
-												<ul class="space-y-1">
+												<div class="match-list">
 													{#each r.matches as m}
-														<li class="font-mono text-[11px] text-neutral-500">
-															<span>{m.file}:{m.line}</span>
-															<span class="ml-2 text-neutral-300">{m.content}</span>
-														</li>
+														<div class="match-item">
+															<span class="match-loc">{m.file}:{m.line}</span>
+															<span class="match-text">{m.content}</span>
+														</div>
 													{/each}
-												</ul>
+												</div>
 											{:else}
-												<p class="text-xs text-neutral-600">No matches found.</p>
+												<p class="no-result">No matches found.</p>
 											{/if}
 										{:else if block.name === 'readFile'}
 											{#if r.content}
-												<pre
-													class="max-h-48 overflow-y-auto text-[11px] leading-relaxed text-neutral-300">{r.content}</pre>
+												<pre>{r.content}</pre>
 											{/if}
 										{:else if block.name === 'listFiles'}
 											{#if Array.isArray(r.files) && r.files.length}
-												<ul class="space-y-0.5">
+												<div class="file-list">
 													{#each r.files as f}
-														<li class="font-mono text-[11px] text-neutral-400">{f}</li>
+														<div class="file-item">{f}</div>
 													{/each}
-												</ul>
+												</div>
 											{/if}
 										{:else}
-											<pre
-												class="overflow-x-auto text-[11px] leading-relaxed text-neutral-500">{JSON.stringify(
-													block.result,
-													null,
-													2
-												)}</pre>
+											<pre>{JSON.stringify(block.result, null, 2)}</pre>
 										{/if}
 									</div>
 								</details>
 							{:else}
-								<div class="px-1">
-									<div
-										class="prose prose-sm max-w-none prose-neutral prose-invert prose-a:text-primary prose-code:rounded prose-code:bg-neutral-800 prose-code:px-1 prose-code:py-0.5 prose-code:text-neutral-300 prose-pre:bg-neutral-900 prose-pre:text-neutral-300"
-									>
+								<div class="text-block">
+									<div class="prose-content">
 										{@html renderMd(block.text)}
 									</div>
 									{#if streamRunning && turn === turns.at(-1) && block === turn.blocks.at(-1)}
-										<span class="text-primary opacity-70">▌</span>
+										<span class="stream-cursor"></span>
 									{/if}
 								</div>
 							{/if}
@@ -413,46 +424,38 @@
 					</div>
 				{/if}
 			{/each}
-
-			{#if streamError}
-				<p class="text-xs text-red-400">{streamError}</p>
-			{/if}
 		</div>
+
+		{#if streamError}
+			<p class="stream-error">{streamError}</p>
+		{/if}
 	</div>
 
-	<div class="shrink-0 border-t border-neutral-800 px-5 py-4">
-		<div class="mx-auto max-w-3xl space-y-2">
-			<div class="flex flex-wrap gap-1.5">
-				{#each [{ label: 'svelte.dev', url: 'https://github.com/sveltejs/svelte.dev' }, { label: 'effect-smol', url: 'https://github.com/Effect-TS/effect-smol' }, { label: 'daytona', url: 'https://github.com/daytonaio/daytona' }] as preset}
+	<!-- Input Area -->
+	<div class="input-area">
+		<div class="input-inner" role="form">
+			<div class="presets">
+				{#each presets as preset}
 					<button
 						onclick={() => (repoUrl = preset.url)}
-						class="rounded-md border px-2.5 py-1 text-xs transition-colors"
-						class:border-primary={repoUrl === preset.url}
-						class:text-primary={repoUrl === preset.url}
-						class:border-neutral-800={repoUrl !== preset.url}
-						class:text-neutral-500={repoUrl !== preset.url}
-						class:hover:border-neutral-700={repoUrl !== preset.url}
-						class:hover:text-neutral-400={repoUrl !== preset.url}>{preset.label}</button
+						class="preset-chip"
+						class:active={repoUrl === preset.url}>{preset.label}</button
 					>
 				{/each}
 			</div>
-			<input
-				bind:value={repoUrl}
-				placeholder="GitHub repo URL (optional)"
-				class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-300 ring-primary/40 outline-none placeholder:text-neutral-600 focus:border-neutral-700 focus:ring-1"
-			/>
-			<div class="flex items-end gap-2">
+			<input bind:value={repoUrl} placeholder="github.com/owner/repo" class="repo-input" />
+			<div class="prompt-row">
 				<textarea
 					bind:value={prompt}
 					onkeydown={handleKeydown}
-					placeholder="Type your message here..."
-					rows={3}
-					class="flex-1 resize-none rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2.5 text-sm text-neutral-100 ring-primary/40 outline-none placeholder:text-neutral-600 focus:border-neutral-700 focus:ring-1"
+					placeholder="Ask anything about the repository…"
+					rows={2}
+					class="prompt-input"
 				></textarea>
 				<button
 					onclick={() => void handleSandboxStream()}
 					disabled={streamRunning || !prompt.trim()}
-					class="mb-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
+					class="send-btn"
 					aria-label="Send"
 				>
 					<svg
@@ -460,14 +463,773 @@
 						viewBox="0 0 24 24"
 						fill="none"
 						stroke="currentColor"
-						stroke-width="2"
-						class="size-4"
+						stroke-width="2.5"
+						width="14"
+						height="14"
 					>
 						<path d="M12 19V5M5 12l7-7 7 7" />
 					</svg>
 				</button>
 			</div>
-			<p class="text-[11px] text-neutral-700">⌘↵ to send</p>
+			<p class="hint">Return to send · Shift+Return for newline</p>
 		</div>
 	</div>
 </div>
+
+<style>
+	:global(html) {
+		background-color: #f5f5f5 !important;
+	}
+
+	.page {
+		display: flex;
+		height: 100vh;
+		flex-direction: column;
+		font-family: 'Figtree', sans-serif;
+		background-color: #f5f5f5;
+		color: #111111;
+		overflow: hidden;
+	}
+
+	/* ── Header ──────────────────────────────────────── */
+	.header {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 0 24px;
+		height: 48px;
+		border-bottom: 1px solid #e2e2e2;
+		background: #ffffff;
+		flex-shrink: 0;
+	}
+
+	.header-title {
+		font-size: 13px;
+		font-weight: 600;
+		color: #111111;
+		letter-spacing: -0.01em;
+	}
+
+	.header-sep {
+		width: 1px;
+		height: 14px;
+		background: #e2e2e2;
+	}
+
+	.header-sub {
+		font-size: 12px;
+		color: #999999;
+		font-weight: 400;
+	}
+
+	.sandbox-id {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		color: #bbbbbb;
+		padding: 2px 6px;
+		background: #f5f5f5;
+		border: 1px solid #e8e8e8;
+	}
+
+	.header-right {
+		margin-left: auto;
+		display: flex;
+		align-items: center;
+		gap: 16px;
+	}
+
+	.btn-new-session {
+		font-family: 'Figtree', sans-serif;
+		font-size: 12px;
+		font-weight: 500;
+		color: #999999;
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 0;
+		transition: color 0.1s;
+	}
+
+	.btn-new-session:hover {
+		color: #111111;
+	}
+
+	.btn-new-session:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.status {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.status-dot {
+		width: 6px;
+		height: 6px;
+		background: #e2e2e2;
+	}
+
+	.status-dot.live {
+		background: #93c5fd;
+		animation: live-pulse 1.4s ease-in-out infinite;
+	}
+
+	@keyframes live-pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.4;
+		}
+	}
+
+	.status-text {
+		font-size: 11px;
+		color: #bbbbbb;
+		font-weight: 500;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.status-text.live {
+		color: #60a5fa;
+	}
+
+	/* ── Messages ────────────────────────────────────── */
+	.messages {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 32px 24px;
+	}
+
+	.messages::-webkit-scrollbar {
+		width: 4px;
+	}
+
+	.messages::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	.messages::-webkit-scrollbar-thumb {
+		background: #e2e2e2;
+	}
+
+	/* ── Empty State ─────────────────────────────────── */
+	.empty {
+		display: flex;
+		height: 100%;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		text-align: center;
+	}
+
+	.empty-label {
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #bbbbbb;
+		margin-bottom: 4px;
+	}
+
+	.empty-title {
+		font-size: 20px;
+		font-weight: 600;
+		color: #111111;
+		letter-spacing: -0.02em;
+		margin: 0;
+	}
+
+	.empty-desc {
+		font-size: 14px;
+		color: #888888;
+		margin: 0;
+		max-width: 300px;
+		line-height: 1.6;
+	}
+
+	.empty-examples {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin-top: 20px;
+		width: 100%;
+		max-width: 360px;
+	}
+
+	.example-btn {
+		font-family: 'Figtree', sans-serif;
+		font-size: 13px;
+		font-weight: 400;
+		color: #555555;
+		background: #ffffff;
+		border: 1px solid #e2e2e2;
+		padding: 10px 14px;
+		cursor: pointer;
+		text-align: left;
+		transition: all 0.1s;
+		width: 100%;
+	}
+
+	.example-btn:hover {
+		background: #eff6ff;
+		border-color: #bfdbfe;
+		color: #1d4ed8;
+	}
+
+	/* ── Turns ───────────────────────────────────────── */
+	.turns {
+		max-width: 680px;
+		margin: 0 auto;
+		display: flex;
+		flex-direction: column;
+		gap: 20px;
+	}
+
+	/* User turn */
+	.user-turn {
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	.user-content {
+		max-width: 72%;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		align-items: flex-end;
+	}
+
+	.repo-pill {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		padding: 3px 8px;
+		background: #f5f5f5;
+		border: 1px solid #e2e2e2;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 10px;
+		color: #999999;
+		max-width: 100%;
+	}
+
+	.repo-pill-text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.user-bubble {
+		background: #dbeafe;
+		border: 1px solid #bfdbfe;
+		padding: 10px 14px;
+	}
+
+	.user-bubble p {
+		margin: 0;
+		font-size: 14px;
+		color: #1e3a5f;
+		line-height: 1.55;
+	}
+
+	/* Assistant turn */
+	.assistant-turn {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	/* Thinking */
+	.thinking {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 2px 0;
+	}
+
+	.thinking-dots span {
+		display: inline-block;
+		width: 4px;
+		height: 4px;
+		background: #cccccc;
+		margin-right: 3px;
+		animation: thinking 1.2s ease-in-out infinite;
+	}
+
+	.thinking-dots span:nth-child(2) {
+		animation-delay: 0.15s;
+	}
+
+	.thinking-dots span:nth-child(3) {
+		animation-delay: 0.3s;
+	}
+
+	@keyframes thinking {
+		0%,
+		80%,
+		100% {
+			opacity: 0.2;
+		}
+		40% {
+			opacity: 1;
+		}
+	}
+
+	.thinking-text {
+		font-size: 12px;
+		color: #bbbbbb;
+		font-style: italic;
+	}
+
+	/* Tool blocks */
+	.tool-block {
+		border: 1px solid #e8e8e8;
+		background: #ffffff;
+	}
+
+	.tool-block.call {
+		border-left: 3px solid #fbbf24;
+	}
+
+	.tool-block.result {
+		border-left: 3px solid #86efac;
+	}
+
+	.tool-summary {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 10px;
+		cursor: pointer;
+		list-style: none;
+		user-select: none;
+	}
+
+	.tool-summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.tool-tag {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 9px;
+		font-weight: 500;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		padding: 2px 5px;
+		flex-shrink: 0;
+	}
+
+	.tool-tag.call {
+		background: #fef9c3;
+		color: #92400e;
+	}
+
+	.tool-tag.result {
+		background: #dcfce7;
+		color: #14532d;
+	}
+
+	.tool-fn {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 12px;
+		color: #333333;
+		font-weight: 500;
+	}
+
+	.tool-badge {
+		font-size: 11px;
+		color: #999999;
+	}
+
+	.tool-detail {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		color: #bbbbbb;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 180px;
+	}
+
+	.tool-chevron {
+		margin-left: auto;
+		color: #cccccc;
+		transition: transform 0.15s;
+		flex-shrink: 0;
+	}
+
+	details[open] .tool-chevron {
+		transform: rotate(180deg);
+	}
+
+	.tool-body {
+		border-top: 1px solid #f0f0f0;
+		padding: 10px 12px;
+		max-height: 260px;
+		overflow-y: auto;
+	}
+
+	.tool-body pre {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		line-height: 1.65;
+		color: #666666;
+		overflow-x: auto;
+		white-space: pre-wrap;
+		word-break: break-all;
+		margin: 0;
+	}
+
+	.tool-err {
+		font-size: 12px;
+		color: #ef4444;
+		margin: 0;
+	}
+
+	/* Search results */
+	.search-query {
+		font-size: 12px;
+		color: #888888;
+		margin: 0 0 10px 0;
+	}
+
+	.search-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.search-item {
+		font-size: 12px;
+	}
+
+	.search-link {
+		font-weight: 500;
+		color: #2563eb;
+		text-decoration: none;
+	}
+
+	.search-link:hover {
+		text-decoration: underline;
+	}
+
+	.search-url {
+		display: block;
+		color: #bbbbbb;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 10px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		margin-top: 1px;
+	}
+
+	.search-snippet {
+		color: #666666;
+		margin: 3px 0 0 0;
+		line-height: 1.55;
+	}
+
+	/* Match list */
+	.match-list {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.match-item {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		color: #666666;
+		line-height: 1.5;
+	}
+
+	.match-loc {
+		color: #999999;
+	}
+
+	.match-text {
+		color: #333333;
+		margin-left: 10px;
+	}
+
+	.no-result {
+		font-size: 12px;
+		color: #bbbbbb;
+		margin: 0;
+	}
+
+	/* File list */
+	.file-list {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+
+	.file-item {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		color: #666666;
+	}
+
+	/* Prose text block */
+	.text-block {
+		padding: 1px 0;
+	}
+
+	.prose-content :global(p) {
+		font-size: 14px;
+		line-height: 1.72;
+		color: #222222;
+		margin: 0 0 12px 0;
+	}
+
+	.prose-content :global(p:last-child) {
+		margin-bottom: 0;
+	}
+
+	.prose-content :global(h1),
+	.prose-content :global(h2),
+	.prose-content :global(h3),
+	.prose-content :global(h4) {
+		font-size: 13px;
+		font-weight: 600;
+		color: #111111;
+		letter-spacing: -0.01em;
+		margin: 18px 0 6px 0;
+	}
+
+	.prose-content :global(code) {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 12px;
+		background: #f0f6ff;
+		border: 1px solid #dbeafe;
+		padding: 1px 5px;
+		color: #1d4ed8;
+	}
+
+	.prose-content :global(pre) {
+		background: #f8f8f8;
+		border: 1px solid #e8e8e8;
+		padding: 12px 14px;
+		overflow-x: auto;
+		margin: 10px 0;
+	}
+
+	.prose-content :global(pre code) {
+		background: none;
+		border: none;
+		padding: 0;
+		font-size: 12px;
+		color: #333333;
+	}
+
+	.prose-content :global(a) {
+		color: #2563eb;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	.prose-content :global(ul),
+	.prose-content :global(ol) {
+		padding-left: 20px;
+		margin: 8px 0;
+	}
+
+	.prose-content :global(li) {
+		font-size: 14px;
+		color: #222222;
+		line-height: 1.65;
+		margin: 3px 0;
+	}
+
+	.prose-content :global(blockquote) {
+		border-left: 3px solid #bfdbfe;
+		padding-left: 12px;
+		margin: 10px 0;
+		color: #555555;
+	}
+
+	.prose-content :global(strong) {
+		font-weight: 600;
+		color: #111111;
+	}
+
+	.prose-content :global(hr) {
+		border: none;
+		border-top: 1px solid #e8e8e8;
+		margin: 16px 0;
+	}
+
+	.stream-cursor {
+		display: inline-block;
+		width: 2px;
+		height: 14px;
+		background: #93c5fd;
+		margin-left: 2px;
+		vertical-align: text-bottom;
+		animation: blink 1s step-start infinite;
+	}
+
+	@keyframes blink {
+		0%,
+		50% {
+			opacity: 1;
+		}
+		51%,
+		100% {
+			opacity: 0;
+		}
+	}
+
+	/* Error */
+	.stream-error {
+		font-size: 12px;
+		color: #ef4444;
+		max-width: 680px;
+		margin: 8px auto 0;
+	}
+
+	/* ── Input Area ──────────────────────────────────── */
+	.input-area {
+		flex-shrink: 0;
+		padding: 10px 24px 16px;
+		background: #f5f5f5;
+		display: flex;
+		justify-content: center;
+	}
+
+	.input-inner {
+		width: 100%;
+		max-width: 620px;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		background: #ffffff;
+		border: 1px solid #e2e2e2;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+		padding: 10px 12px 8px;
+	}
+
+	.presets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 3px;
+	}
+
+	.preset-chip {
+		font-family: 'Figtree', sans-serif;
+		font-size: 11px;
+		font-weight: 500;
+		padding: 2px 8px;
+		border: 1px solid #e8e8e8;
+		background: #f8f8f8;
+		color: #999999;
+		cursor: pointer;
+		transition: all 0.1s;
+	}
+
+	.preset-chip:hover {
+		background: #f0f6ff;
+		border-color: #bfdbfe;
+		color: #2563eb;
+	}
+
+	.preset-chip.active {
+		background: #eff6ff;
+		border-color: #93c5fd;
+		color: #1d4ed8;
+	}
+
+	.repo-input {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		width: 100%;
+		background: #f8f8f8;
+		border: 1px solid #eeeeee;
+		padding: 5px 8px;
+		color: #333333;
+		outline: none;
+		transition: border-color 0.1s;
+	}
+
+	.repo-input::placeholder {
+		color: #cccccc;
+	}
+
+	.repo-input:focus {
+		border-color: #93c5fd;
+		background: #ffffff;
+	}
+
+	.prompt-row {
+		display: flex;
+		align-items: flex-end;
+		gap: 6px;
+		border-top: 1px solid #f0f0f0;
+		padding-top: 6px;
+		margin-top: 2px;
+	}
+
+	.prompt-input {
+		font-family: 'Figtree', sans-serif;
+		font-size: 13px;
+		flex: 1;
+		background: transparent;
+		border: none;
+		padding: 4px 0;
+		color: #111111;
+		outline: none;
+		resize: none;
+		line-height: 1.5;
+	}
+
+	.prompt-input::placeholder {
+		color: #cccccc;
+	}
+
+	.prompt-input:focus {
+		border-color: #93c5fd;
+		background: #ffffff;
+	}
+
+	.send-btn {
+		flex-shrink: 0;
+		width: 30px;
+		height: 30px;
+		background: #3b82f6;
+		border: none;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: #ffffff;
+		transition: background 0.1s;
+		border-radius: 6px;
+	}
+
+	.send-btn:hover:not(:disabled) {
+		background: #2563eb;
+	}
+
+	.send-btn:disabled {
+		background: #dbeafe;
+		color: #93c5fd;
+		cursor: not-allowed;
+	}
+
+	.hint {
+		font-size: 10px;
+		color: #d0d0d0;
+		margin: 0;
+	}
+</style>

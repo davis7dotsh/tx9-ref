@@ -220,16 +220,13 @@ const MyRoutes = HttpRouter.use((router) =>
 
 				const mainStream = Stream.fromAsyncIterable(result.fullStream, (err) =>
 					console.error(err)
-				).pipe(Stream.map((part) => JSON.stringify({ event: 'data', chunk: part }) + '\n'));
+				).pipe(Stream.map((part) => JSON.stringify(part) + '\n'));
 
 				const doneStream = Stream.fromEffect(
 					Effect.promise(() => result.response).pipe(
 						Effect.map(
 							({ messages: responseMessages }) =>
-								JSON.stringify({
-									event: 'data',
-									chunk: { type: 'done', messages: responseMessages }
-								}) + '\n'
+								JSON.stringify({ type: 'done', messages: responseMessages }) + '\n'
 						)
 					)
 				);
