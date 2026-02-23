@@ -5,7 +5,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { stepCountIs, streamText, tool, type ModelMessage } from 'ai';
 import { Effect, Layer, Stream } from 'effect';
-import { HttpRouter, HttpServerResponse } from 'effect/unstable/http';
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http';
 import Exa from 'exa-js';
 import { exec } from 'node:child_process';
 import * as Http from 'node:http';
@@ -212,17 +212,31 @@ const MyRoutes = HttpRouter.use((router) =>
 			'POST',
 			'/stream',
 			Effect.gen(function* () {
-				const { fullStream } = createStream();
-				const sendStream = Stream.fromAsyncIterable(fullStream, (err) => console.error(err));
-				const processedStream = sendStream.pipe(
-					Stream.mapEffect((part) =>
-						Effect.gen(function* () {
-							return JSON.stringify({ event: 'data', chunk: part }) + '\n';
-						})
-					),
-					Stream.encodeText
+				const request = yield* HttpServerRequest.HttpServerRequest;
+				const body = yield* request.json.pipe(Effect.orElseSucceed(() => ({}) as unknown));
+				const messages = (body as { messages?: ModelMessage[] }).messages;
+
+				const result = createStream(messages);
+
+				const mainStream = Stream.fromAsyncIterable(result.fullStream, (err) =>
+					console.error(err)
+				).pipe(Stream.map((part) => JSON.stringify({ event: 'data', chunk: part }) + '\n'));
+
+				const doneStream = Stream.fromEffect(
+					Effect.promise(() => result.response).pipe(
+						Effect.map(
+							({ messages: responseMessages }) =>
+								JSON.stringify({
+									event: 'data',
+									chunk: { type: 'done', messages: responseMessages }
+								}) + '\n'
+						)
+					)
 				);
-				return HttpServerResponse.stream(processedStream);
+
+				return HttpServerResponse.stream(
+					Stream.concat(mainStream, doneStream).pipe(Stream.encodeText)
+				);
 			})
 		);
 

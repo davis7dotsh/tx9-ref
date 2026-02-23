@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { commandSandboxTest } from '$lib/remote/daytona.remote';
 	import type { CodeRunStreamChunkType } from '$lib/services/daytona/coderunStream';
+	import type { ModelMessage } from 'ai';
 	import { isHttpError } from '@sveltejs/kit';
 	import { marked } from 'marked';
 	import { tick } from 'svelte';
@@ -8,7 +8,10 @@
 	const renderMd = (text: string) => marked.parse(text) as string;
 
 	type StreamChunk = CodeRunStreamChunkType extends AsyncIterable<infer T> ? T : never;
-	type StreamEvent = { event: string; chunk: StreamChunk };
+	type StreamEvent = {
+		event: string;
+		chunk: StreamChunk | { type: 'done'; messages: ModelMessage[] };
+	};
 	type ToolStartBlock = { id: number; kind: 'tool_start'; name: string; input?: unknown };
 	type ToolResultBlock = { id: number; kind: 'tool_result'; name: string; result?: unknown };
 	type TextBlock = { id: number; kind: 'text'; text: string };
@@ -42,6 +45,8 @@
 	let repoUrl = $state('');
 	let turns = $state<Turn[]>([]);
 	let messagesEl = $state<HTMLDivElement | null>(null);
+	let sandboxId = $state<string | null>(null);
+	let messages = $state<ModelMessage[]>([]);
 
 	let blockId = 0;
 
@@ -86,19 +91,26 @@
 		}
 	};
 
+	const newSession = () => {
+		sandboxId = null;
+		messages = [];
+		turns = [];
+		streamError = '';
+	};
+
 	const handleSandboxStream = async () => {
 		if (!prompt.trim() || streamRunning) return;
 		streamRunning = true;
 		streamError = '';
 
-		const userTurn: Turn = {
-			role: 'user',
-			text: prompt.trim(),
-			repoUrl: repoUrl.trim() || undefined
-		};
-		turns = [...turns, userTurn, { role: 'assistant', blocks: [] }];
 		const sentPrompt = prompt.trim();
 		const sentRepoUrl = repoUrl.trim();
+		const userContent = sentRepoUrl ? `Repository: ${sentRepoUrl}\n\n${sentPrompt}` : sentPrompt;
+		const userMessage: ModelMessage = { role: 'user', content: userContent };
+		const messagesToSend = [...messages, userMessage];
+
+		const userTurn: Turn = { role: 'user', text: sentPrompt, repoUrl: sentRepoUrl || undefined };
+		turns = [...turns, userTurn, { role: 'assistant', blocks: [] }];
 		prompt = '';
 		await scrollToBottom();
 
@@ -106,8 +118,12 @@
 			const res = await fetch('/api/sandbox/stream', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ prompt: sentPrompt, repoUrl: sentRepoUrl || undefined })
+				body: JSON.stringify({ messages: messagesToSend, sandboxId: sandboxId ?? undefined })
 			});
+
+			const newSandboxId = res.headers.get('X-Sandbox-Id');
+			if (newSandboxId) sandboxId = newSandboxId;
+
 			if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 
 			const reader = res.body!.getReader();
@@ -175,8 +191,13 @@
 						continue;
 					}
 
+					if (chunk.type === 'done') {
+						messages = [...messagesToSend, ...chunk.messages];
+						continue;
+					}
+
 					if (chunk.type === 'error') {
-						streamError = String(chunk.error) ?? 'Unknown stream error';
+						streamError = String((chunk as { error: unknown }).error) ?? 'Unknown stream error';
 					}
 				}
 			}
@@ -202,7 +223,21 @@
 		<span class="text-sm font-medium text-neutral-100">Research Agent</span>
 		<span class="text-neutral-700">·</span>
 		<span class="text-xs text-neutral-500">Daytona sandbox</span>
-		<div class="ml-auto flex items-center gap-1.5">
+		{#if sandboxId}
+			<span class="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-500"
+				>{sandboxId.slice(0, 8)}…</span
+			>
+		{/if}
+		<div class="ml-auto flex items-center gap-3">
+			{#if turns.length}
+				<button
+					onclick={newSession}
+					disabled={streamRunning}
+					class="text-xs text-neutral-500 hover:text-neutral-300 disabled:cursor-not-allowed disabled:opacity-40"
+				>
+					New session
+				</button>
+			{/if}
 			{#if streamRunning}
 				<span class="size-1.5 animate-pulse rounded-full bg-primary"></span>
 				<span class="text-xs text-primary">streaming</span>

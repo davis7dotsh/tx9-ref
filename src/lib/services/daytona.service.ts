@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { Daytona } from '@daytonaio/sdk';
-import { Effect, Layer, Schedule, Schema, Scope, ServiceMap } from 'effect';
+import { Effect, Layer, Schedule, Schema, ServiceMap } from 'effect';
 import coderunBundle from 'virtual:coderun-bundle';
 import coderunStreamBundle from 'virtual:coderun-stream-bundle';
 
@@ -20,26 +20,67 @@ const daytonaServiceEffect = Effect.gen(function* () {
 		apiUrl: env.DAYTONA_BASE_URL
 	});
 
-	const codeRunStream = (prompt: string, repoUrl?: string) =>
+	const codeRunStream = ({ messages, sandboxId }: { messages: unknown[]; sandboxId?: string }) =>
 		Effect.gen(function* () {
-			yield* Effect.logInfo('[stream] creating sandbox');
-			const sandbox = yield* Effect.tryPromise({
-				try: () =>
-					daytona.create({
-						envVars: {
-							OPENAI_API_KEY: env.OPENAI_API_KEY,
-							EXA_API_KEY: env.EXA_API_KEY,
-							BTCA_PROMPT: prompt,
-							...(repoUrl ? { BTCA_REPO_URL: repoUrl } : {})
+			const sandbox = yield* sandboxId
+				? Effect.gen(function* () {
+						yield* Effect.logInfo(`[stream] getting sandbox ${sandboxId}`);
+						const existing = yield* Effect.tryPromise({
+							try: () => daytona.get(sandboxId),
+							catch: (error) =>
+								new DaytonaError({ message: 'Failed to get sandbox', code: 500, cause: error })
+						});
+						if (existing.state !== 'started') {
+							yield* Effect.logInfo(`[stream] starting sandbox ${sandboxId}`);
+							yield* Effect.tryPromise({
+								try: () => daytona.start(existing, 60),
+								catch: (error) =>
+									new DaytonaError({
+										message: 'Failed to start sandbox',
+										code: 500,
+										cause: error
+									})
+							});
 						}
-					}),
+						return existing;
+					})
+				: Effect.gen(function* () {
+						yield* Effect.logInfo('[stream] creating sandbox');
+						return yield* Effect.tryPromise({
+							try: () =>
+								daytona.create({
+									envVars: {
+										OPENAI_API_KEY: env.OPENAI_API_KEY,
+										EXA_API_KEY: env.EXA_API_KEY
+									}
+								}),
+							catch: (error) =>
+								new DaytonaError({ message: 'Failed to create sandbox', code: 500, cause: error })
+						});
+					});
+
+			const currentSandboxId = sandbox.id;
+
+			const preview = yield* Effect.tryPromise({
+				try: () => sandbox.getPreviewLink(3000),
 				catch: (error) =>
-					new DaytonaError({ message: 'Failed to create sandbox', code: 500, cause: error })
+					new DaytonaError({ message: 'Failed to get preview link', code: 500, cause: error })
 			});
 
-			const stop = () => sandbox.stop().catch(() => {});
+			const previewUrl = (path: string) =>
+				`${preview.url}${path}?DAYTONA_SANDBOX_AUTH_KEY=${preview.token}`;
 
-			const sandboxRes = yield* Effect.gen(function* () {
+			const isHealthy = yield* Effect.tryPromise({
+				try: () =>
+					fetch(previewUrl('/health'))
+						.then((r) => r.ok)
+						.catch(() => false),
+				catch: () => false
+			}).pipe(Effect.orElseSucceed(() => false));
+
+			if (!isHealthy) {
+				yield* Effect.logInfo('[stream] server not running, starting...');
+
 				yield* Effect.tryPromise({
 					try: () =>
 						sandbox.fs.uploadFile(Buffer.from(coderunStreamBundle), '/tmp/coderunStream.mjs'),
@@ -48,10 +89,14 @@ const daytonaServiceEffect = Effect.gen(function* () {
 				});
 
 				yield* Effect.tryPromise({
+					try: () => sandbox.process.executeCommand('pkill -f coderunStream.mjs || true'),
+					catch: () => ({ exitCode: 0, result: '' })
+				}).pipe(Effect.ignore);
+
+				yield* Effect.tryPromise({
 					try: () => sandbox.process.createSession('stream-server'),
-					catch: (error) =>
-						new DaytonaError({ message: 'Failed to create session', code: 500, cause: error })
-				});
+					catch: () => undefined
+				}).pipe(Effect.ignore);
 
 				const { cmdId } = yield* Effect.tryPromise({
 					try: () =>
@@ -63,15 +108,6 @@ const daytonaServiceEffect = Effect.gen(function* () {
 						new DaytonaError({ message: 'Failed to start stream server', code: 500, cause: error })
 				});
 				yield* Effect.logInfo(`[stream] server started cmdId=${cmdId}`);
-
-				const preview = yield* Effect.tryPromise({
-					try: () => sandbox.getPreviewLink(3000),
-					catch: (error) =>
-						new DaytonaError({ message: 'Failed to get preview link', code: 500, cause: error })
-				});
-
-				const previewUrl = (path: string) =>
-					`${preview.url}${path}?DAYTONA_SANDBOX_AUTH_KEY=${preview.token}`;
 
 				yield* Effect.retry(
 					Effect.gen(function* () {
@@ -87,36 +123,39 @@ const daytonaServiceEffect = Effect.gen(function* () {
 					}),
 					Schedule.exponential('500 millis').pipe(Schedule.compose(Schedule.recurs(20)))
 				);
+			}
 
-				yield* Effect.logInfo('[stream] server ready');
+			yield* Effect.logInfo('[stream] server ready');
 
-				return yield* Effect.tryPromise({
-					try: () => fetch(previewUrl('/stream'), { method: 'POST' }),
-					catch: (error) =>
-						new DaytonaError({ message: 'Failed to connect to stream', code: 500, cause: error })
-				});
-			}).pipe(Effect.tapError(() => Effect.promise(stop)));
-
-			return new ReadableStream<Uint8Array>({
-				async start(controller) {
-					try {
-						const reader = sandboxRes.body!.getReader();
-						while (true) {
-							const { done, value } = await reader.read();
-							if (done) break;
-							controller.enqueue(value);
-						}
-						controller.close();
-					} catch (e) {
-						controller.error(e);
-					} finally {
-						await stop();
-					}
-				},
-				cancel() {
-					stop();
-				}
+			const sandboxRes = yield* Effect.tryPromise({
+				try: () =>
+					fetch(previewUrl('/stream'), {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ messages })
+					}),
+				catch: (error) =>
+					new DaytonaError({ message: 'Failed to connect to stream', code: 500, cause: error })
 			});
+
+			return {
+				sandboxId: currentSandboxId,
+				stream: new ReadableStream<Uint8Array>({
+					async start(controller) {
+						try {
+							const reader = sandboxRes.body!.getReader();
+							while (true) {
+								const { done, value } = await reader.read();
+								if (done) break;
+								controller.enqueue(value);
+							}
+							controller.close();
+						} catch (e) {
+							controller.error(e);
+						}
+					}
+				})
+			};
 		});
 
 	const basicCodeRun = Effect.gen(function* () {
