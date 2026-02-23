@@ -45,7 +45,7 @@ const createStream = (messages?: ModelMessage[]) => {
 	const userContent = repoUrl ? `Repository: ${repoUrl}\n\n${prompt}` : prompt;
 
 	return streamText({
-		model: openai('gpt-5.3-codex-api-preview'),
+		model: openai('gpt-5.2-codex'),
 		messages: messages ?? [{ role: 'user', content: userContent }],
 		system: systemPrompt,
 		stopWhen: stepCountIs(20),
