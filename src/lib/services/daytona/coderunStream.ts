@@ -245,11 +245,11 @@ const MyRoutes = HttpRouter.use((router) =>
 );
 
 const serverLayer = HttpRouter.serve(MyRoutes).pipe(
-	Layer.provideMerge(NodeHttpServer.layer(() => Http.createServer(), { port: 3000 }))
+	Layer.provideMerge(NodeHttpServer.layer(() => Http.createServer(), { port: 3213 }))
 );
 
 const program = Effect.gen(function* () {
-	console.log('Server running on http://localhost:3000');
+	console.log('Server running on http://localhost:3213');
 	yield* Effect.never;
 }).pipe(Effect.provide(serverLayer));
 

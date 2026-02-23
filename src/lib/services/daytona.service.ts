@@ -62,7 +62,7 @@ const daytonaServiceEffect = Effect.gen(function* () {
 			const currentSandboxId = sandbox.id;
 
 			const preview = yield* Effect.tryPromise({
-				try: () => sandbox.getPreviewLink(3000),
+				try: () => sandbox.getPreviewLink(3213),
 				catch: (error) =>
 					new DaytonaError({ message: 'Failed to get preview link', code: 500, cause: error })
 			});

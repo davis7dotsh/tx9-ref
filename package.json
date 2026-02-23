@@ -11,7 +11,9 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check .",
-		"format": "prettier --write ."
+		"format": "prettier --write .",
+		"sandbox:demo": "bun scripts/run-sandbox.ts demo",
+		"sandbox:stream": "bun scripts/run-sandbox.ts stream"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.0",

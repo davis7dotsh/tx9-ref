@@ -50,11 +50,6 @@
 
 	let blockId = 0;
 
-	const scrollToBottom = async () => {
-		await tick();
-		if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
-	};
-
 	const currentBlocks = (): FlowBlock[] => {
 		const last = turns.at(-1);
 		return last?.role === 'assistant' ? last.blocks : [];
@@ -75,7 +70,6 @@
 				{ role: 'assistant', blocks: [...blocks, { id: ++blockId, kind: 'text', text: delta }] }
 			];
 		}
-		scrollToBottom();
 	};
 
 	const handleError = (e: unknown) => {
@@ -112,7 +106,6 @@
 		const userTurn: Turn = { role: 'user', text: sentPrompt, repoUrl: sentRepoUrl || undefined };
 		turns = [...turns, userTurn, { role: 'assistant', blocks: [] }];
 		prompt = '';
-		await scrollToBottom();
 
 		try {
 			const res = await fetch('/api/sandbox/stream', {
@@ -159,7 +152,6 @@
 								]
 							}
 						];
-						await scrollToBottom();
 						continue;
 					}
 
@@ -182,7 +174,6 @@
 								]
 							}
 						];
-						await scrollToBottom();
 						continue;
 					}
 
@@ -192,6 +183,7 @@
 					}
 
 					if (chunk.type === 'done') {
+						console.log('done', chunk.messages);
 						messages = [...messagesToSend, ...chunk.messages];
 						continue;
 					}
@@ -206,12 +198,11 @@
 			streamError = e instanceof Error ? e.message : 'Unknown stream error';
 		} finally {
 			streamRunning = false;
-			await scrollToBottom();
 		}
 	};
 
 	const handleKeydown = (e: KeyboardEvent) => {
-		if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+		if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
 			e.preventDefault();
 			void handleSandboxStream();
 		}
